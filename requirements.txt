@@ -1,0 +1,9 @@
+torch>=2.0.0
+torchvision
+pillow
+matplotlib
+numpy
+fastapi
+uvicorn[standard]
+python-multipart
+opencv-python
