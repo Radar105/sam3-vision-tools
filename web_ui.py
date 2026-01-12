@@ -332,6 +332,11 @@ async def segment(
         model = get_model()
         result = model.segment(img, prompt)
 
+        # Generate colors for masks (same as visualization)
+        n_masks = len(result['masks'])
+        colors_arr = plt.cm.tab10(np.linspace(0, 1, max(n_masks, 1)))
+        hex_colors = ['#{:02x}{:02x}{:02x}'.format(int(c[0]*255), int(c[1]*255), int(c[2]*255)) for c in colors_arr[:n_masks]]
+
         # Create visualization
         viz_base64 = create_visualization(img, result, prompt, viz_mode)
 
@@ -343,8 +348,9 @@ async def segment(
         return {
             "success": True,
             "prompt": prompt,
-            "count": len(result['masks']),
+            "count": n_masks,
             "scores": scores,
+            "colors": hex_colors,
             "image_size": list(img.size),
             "visualization": f"data:image/jpeg;base64,{viz_base64}"
         }
@@ -735,12 +741,12 @@ HTML_TEMPLATE = """
                 </div>
 
                 <div class="camera-controls" id="cameraControls" style="display:none;">
-                    <button class="btn btn-secondary" onclick="moveCamera(0, 20000)">↑</button>
+                    <button class="btn btn-secondary" onclick="moveCamera(0, TILT_STEP)">↑</button>
                     <button class="btn btn-secondary" onclick="moveCamera(0, 0, 1)">+</button>
                     <button class="btn btn-secondary" onclick="resetCamera()">⟲</button>
-                    <button class="btn btn-secondary" onclick="moveCamera(-20000, 0)">←</button>
-                    <button class="btn btn-secondary" onclick="moveCamera(0, -20000)">↓</button>
-                    <button class="btn btn-secondary" onclick="moveCamera(20000, 0)">→</button>
+                    <button class="btn btn-secondary" onclick="moveCamera(-PAN_STEP, 0)">←</button>
+                    <button class="btn btn-secondary" onclick="moveCamera(0, -TILT_STEP)">↓</button>
+                    <button class="btn btn-secondary" onclick="moveCamera(PAN_STEP, 0)">→</button>
                     <button class="btn btn-secondary" onclick="moveCamera(0, 0, -1)">−</button>
                 </div>
             </div>
@@ -787,7 +793,11 @@ HTML_TEMPLATE = """
 
     <script>
         let currentImage = null;
+        let cameraPan = 0;
+        let cameraTilt = 0;
         let cameraZoom = 0;
+        const PAN_STEP = 5000;
+        const TILT_STEP = 5000;
 
         // Set default API URL
         document.getElementById('apiUrl').value = window.location.origin;
@@ -911,8 +921,12 @@ HTML_TEMPLATE = """
                     document.getElementById('resultImg').style.display = 'block';
                     document.getElementById('resultPrompt').textContent = data.prompt;
                     document.getElementById('resultCount').textContent = data.count;
-                    document.getElementById('resultScores').textContent =
-                        data.scores.map(s => (s * 100).toFixed(1) + '%').join(', ');
+                    // Color-coded confidence scores
+                    const scoresHtml = data.scores.map((s, i) => {
+                        const color = data.colors && data.colors[i] ? data.colors[i] : '#fff';
+                        return `<span style="color:${color};font-weight:bold">${(s * 100).toFixed(1)}%</span>`;
+                    }).join(', ');
+                    document.getElementById('resultScores').innerHTML = scoresHtml;
                     document.getElementById('resultInfo').style.display = 'block';
 
                     // Update model status
@@ -958,10 +972,16 @@ HTML_TEMPLATE = """
             }
         }
 
-        async function moveCamera(pan, tilt, zoomDelta) {
+        async function moveCamera(panDelta, tiltDelta, zoomDelta) {
             const formData = new FormData();
-            if (pan) formData.append('pan', pan);
-            if (tilt) formData.append('tilt', tilt);
+            if (panDelta) {
+                cameraPan = Math.max(-36000, Math.min(36000, cameraPan + panDelta));
+                formData.append('pan', cameraPan);
+            }
+            if (tiltDelta) {
+                cameraTilt = Math.max(-36000, Math.min(36000, cameraTilt + tiltDelta));
+                formData.append('tilt', cameraTilt);
+            }
             if (zoomDelta) {
                 cameraZoom = Math.max(0, Math.min(12, cameraZoom + zoomDelta));
                 formData.append('zoom', cameraZoom);
@@ -974,6 +994,8 @@ HTML_TEMPLATE = """
         }
 
         async function resetCamera() {
+            cameraPan = 0;
+            cameraTilt = 0;
             cameraZoom = 0;
             const formData = new FormData();
             formData.append('pan', 0);
